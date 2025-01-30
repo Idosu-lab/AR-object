@@ -4,7 +4,7 @@ import os
 import matplotlib.pyplot as plt
 
 # Chessboard dimensions (verify correct size)
-chessboard_size = (9, 6)  # Adjust if needed by counting INNER corners
+chessboard_size = (8, 6)  # Adjusted to match 9x7 squares (8x6 inner corners)
 square_size = 25  # Size of each square in mm (adjust accordingly)
 
 # Prepare object points (3D points in real-world space)
@@ -37,18 +37,20 @@ for fname in image_files[:5]:  # Test with first 5 images first
 
     print(f"Processing: {fname}, Shape: {img.shape}")  # Debug: Check image dimensions
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 100, 200)  # Edge detection for better corner visibility
 
-    # Display grayscale and edge-detected images
+    # Apply adaptive thresholding to improve contrast
+    enhanced = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+
+    # Display grayscale and thresholded images
     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
     axes[0].imshow(gray, cmap='gray')
     axes[0].set_title(f"Grayscale: {fname}")
-    axes[1].imshow(edges, cmap='gray')
-    axes[1].set_title(f"Edges: {fname}")
+    axes[1].imshow(enhanced, cmap='gray')
+    axes[1].set_title(f"Thresholded: {fname}")
     plt.show()
 
-    # Find chessboard corners
-    ret, corners = cv2.findChessboardCorners(gray, chessboard_size, None)
+    # Use the more robust chessboard detection method
+    ret, corners = cv2.findChessboardCornersSB(enhanced, chessboard_size, None)
 
     if ret:
         print(f"✅ Chessboard detected in {fname}")
