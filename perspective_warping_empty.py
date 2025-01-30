@@ -1,17 +1,18 @@
 import cv2
 import numpy as np
+from collections import deque
 
 # ======= imports
 
 # ======= constants
-ref_img = cv2.imread("cover1.jpg")  # The original reference image
+ref_img = cv2.imread("cover12.jpg")  # The original reference image
 if ref_img is None:
     raise ValueError("Error: Could not load reference image.")
 
 orb = cv2.ORB_create()
 kp_ref, des_ref = orb.detectAndCompute(ref_img, None)
 
-video = cv2.VideoCapture("vid1.MOV")  # The recorded video for tracking
+video = cv2.VideoCapture("vid2.MOV")  # The recorded video for tracking
 if not video.isOpened():
     raise ValueError("Error: Could not open video.")
 
@@ -22,6 +23,11 @@ flann = cv2.FlannBasedMatcher(index_params, search_params)
 
 fourcc = cv2.VideoWriter_fourcc(*'XVID')
 out = None
+
+# Homography storage
+H_history = deque(maxlen=5)
+last_valid_H = None
+alpha = 0.5  # Reduced smoothing factor for better responsiveness
 
 # === template image keypoint and descriptors
 
@@ -46,22 +52,44 @@ while True:
     for match in matches:
         if len(match) == 2:  # Ensure we have two matches before unpacking
             m, n = match
-            if m.distance < 0.75 * n.distance:
+            if m.distance < 0.7 * n.distance:  # Stricter match filtering
                 good_matches.append(m)
 
-    if len(good_matches) > 10:
+    min_matches = 40  # Keep dynamic frame processing
+    if len(good_matches) > min_matches:
         # ======== find homography
         # also in SIFT notebook
         src_pts = np.float32([kp_ref[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
         dst_pts = np.float32([kp_frame[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
 
-        H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
-        h, w, _ = ref_img.shape
+        H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)  # Increased RANSAC threshold
 
+        # Ensure H is valid before using it
+        if H is not None:
+            if last_valid_H is not None:
+                H = alpha * last_valid_H + (1 - alpha) * H  # Blended smoothing
+            last_valid_H = H  # Store the smoothed homography
+        else:
+            if last_valid_H is not None:
+                H = last_valid_H  # Reuse the last valid homography
+            else:
+                continue  # If no valid homography, skip this frame
+
+        h, w, _ = ref_img.shape
         # ++++++++ do warping of another image on template image
         # we saw this in SIFT notebook
         warped = cv2.warpPerspective(ref_img, H, (frame.shape[1], frame.shape[0]))
-        overlay = cv2.addWeighted(frame, 0.5, warped, 0.5, 0)
+
+        # Ensure mask size and type are correct
+        mask = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+        _, mask = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
+        mask = cv2.resize(mask, (frame.shape[1], frame.shape[0]))  # Resize to match frame size
+        mask = mask.astype(np.uint8)  # Convert to uint8 (CV_8U)
+
+        # Blend using masked region
+        frame_bg = cv2.bitwise_and(frame, frame, mask=cv2.bitwise_not(mask))
+        warped_fg = cv2.bitwise_and(warped, warped, mask=mask)
+        overlay = cv2.add(frame_bg, warped_fg)
 
         if out is None:
             out = cv2.VideoWriter('warped_output.avi', fourcc, 20.0, (frame.shape[1], frame.shape[0]))
