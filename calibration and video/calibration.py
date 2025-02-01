@@ -16,12 +16,11 @@ objp *= square_size
 objpoints = []  # 3D points in real-world space
 imgpoints = []  # 2D points in image plane
 
-# List of calibration images excluding "Large" versions
+# List of good calibration images
 image_files = [
-    "IMG_9041.jpeg", "IMG_9042.jpeg", "IMG_9043.jpeg", "IMG_9044.jpeg", "IMG_9045.jpeg", "IMG_9046.jpeg",
-    "IMG_9047.jpeg", "IMG_9048.jpeg", "IMG_9049.jpeg", "IMG_9050.jpeg", "IMG_9051.jpeg", "IMG_9052.jpeg",
-    "IMG_9053.jpeg", "IMG_9054.jpeg", "IMG_9055.jpeg", "IMG_9056.jpeg", "IMG_9057.jpeg", "IMG_9058.jpeg",
-    "IMG_9059.jpeg", "IMG_9060.jpeg", "IMG_9061.jpeg"
+    "IMG_9093 Large.jpeg", "IMG_9095 Large.jpeg", "IMG_9097 Large.jpeg", "IMG_9098 Large.jpeg",
+    "IMG_9099 Large.jpeg", "IMG_9100 Large.jpeg", "IMG_9101 Large.jpeg", "IMG_9102 Large.jpeg",
+    "IMG_9103 Large.jpeg", "IMG_9104 Large.jpeg"
 ]
 
 # Print found images to debug
@@ -29,7 +28,7 @@ print("Found Images:", image_files)
 
 last_gray = None  # Variable to store the last valid grayscale image
 
-for fname in image_files[:5]:  # Test with first 5 images first
+for fname in image_files:
     img = cv2.imread(fname)
     if img is None:
         print(f"Warning: Unable to read {fname}")
@@ -40,14 +39,6 @@ for fname in image_files[:5]:  # Test with first 5 images first
 
     # Apply adaptive thresholding to improve contrast
     enhanced = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-
-    # Display grayscale and thresholded images
-    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-    axes[0].imshow(gray, cmap='gray')
-    axes[0].set_title(f"Grayscale: {fname}")
-    axes[1].imshow(enhanced, cmap='gray')
-    axes[1].set_title(f"Thresholded: {fname}")
-    plt.show()
 
     # Use the more robust chessboard detection method
     ret, corners = cv2.findChessboardCornersSB(enhanced, chessboard_size, None)
@@ -62,14 +53,6 @@ for fname in image_files[:5]:  # Test with first 5 images first
         corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1),
                                     criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001))
         imgpoints[-1] = corners2
-
-        # Draw and display the corners
-        cv2.drawChessboardCorners(img, chessboard_size, corners2, ret)
-        plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        plt.title(f"Detected Corners: {fname}")
-        plt.show()
-    else:
-        print(f"❌ Chessboard NOT detected in {fname}")
 
 cv2.destroyAllWindows()
 
