@@ -92,7 +92,7 @@ while True:
         overlay = cv2.add(frame_bg, warped_fg)
 
         if out is None:
-            out = cv2.VideoWriter('warped_output.avi', fourcc, 20.0, (frame.shape[1], frame.shape[0]))
+            out = cv2.VideoWriter('wrapped_vid.avi', fourcc, 20.0, (frame.shape[1], frame.shape[0]))
         out.write(overlay)
 
         # =========== plot and save frame

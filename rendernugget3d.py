@@ -2,6 +2,7 @@ import os
 import cv2
 import numpy as np
 from collections import deque
+import shutil
 
 # -------------------------------
 # 1. Disable OpenCL (to avoid errors)
@@ -9,14 +10,22 @@ from collections import deque
 cv2.ocl.setUseOpenCL(False)
 
 # -------------------------------
-# 2. Camera Calibration Parameters
+# 2. Updated Camera Calibration Parameters
 # -------------------------------
-camera_matrix = np.array([[914.83565528, 0., 473.00332971],
-                          [0., 916.97895899, 641.10946217],
-                          [0., 0., 1.]], dtype=np.float32)
-dist_coefs = np.array([2.28710423e-01, -7.17194756e-01,
-                       2.12408818e-04, -2.47017341e-03,
-                       3.13534277e-02], dtype=np.float32)
+# RMS Error: 9.521700391689423
+# Camera Matrix (K):
+#  [[5.85493857e+03, 0.00000000e+00, 8.43369971e+02],
+#   [0.00000000e+00, 4.13083151e+03, 6.01898161e+02],
+#   [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]]
+# Distortion Coefficients:
+#  [ 5.38606908e+00, -7.73244839e+01, 7.51650400e-01, 1.17381409e-01, 2.67996027e+02]
+
+camera_matrix = np.array([[5.85493857e+03, 0.0, 8.43369971e+02],
+                          [0.0, 4.13083151e+03, 6.01898161e+02],
+                          [0.0, 0.0, 1.0]], dtype=np.float32)
+dist_coefs = np.array([5.38606908e+00, -7.73244839e+01,
+                       7.51650400e-01, 1.17381409e-01,
+                       2.67996027e+02], dtype=np.float32)
 
 # -------------------------------
 # 3. Reference Cover Image & Its Real-World Size
@@ -30,7 +39,7 @@ if cover_img is None:
 cover_width_mm = 200.0
 cover_height_mm = 250.0
 
-# Define the cover’s 3D object points (in mm) assuming the top‑left corner is (0,0,0)
+# Define the cover’s 3D object points (assuming top‑left is (0,0,0))
 cover_obj_points = np.array([
     [0, 0, 0],
     [cover_width_mm, 0, 0],
@@ -46,18 +55,15 @@ cover_img_corners = np.array([
     [0, h_cover]
 ], dtype=np.float32)
 
-
 # -------------------------------
-# 4. Load the OBJ Model and Its Texture
+# 4. Load the Nugget OBJ Model and Its Texture
 # -------------------------------
-# A simple OBJ loader that extracts vertices, texture coordinates, and faces.
 class OBJ:
     def __init__(self, filename, swapyz=False):
         self.vertices = []  # list of [x, y, z]
         self.normals = []  # list of [nx, ny, nz] (not used here)
-        self.texcoords = []  # list of [u, v] (assumed normalized in [0,1])
+        self.texcoords = []  # list of [u, v] (assumed normalized)
         self.faces = []  # list of tuples: (vertex_indices, normal_indices, texcoord_indices, material)
-
         material = None
         with open(filename, "r") as f:
             for line in f:
@@ -101,17 +107,14 @@ class OBJ:
                             face_vn.append(-1)
                     self.faces.append((face_v, face_vn, face_vt, material))
 
-
-# Load the model and its texture.
-obj_filename = "whole chicken nugget.obj"
-model = OBJ(obj_filename, swapyz=True)
+nugget_obj_filename = "whole chicken nugget.obj"
+model = OBJ(nugget_obj_filename, swapyz=True)
 texture_img = cv2.imread("whole chicken nugget_1.jpg")
 if texture_img is None:
     raise ValueError("Error: Could not load texture image 'whole chicken nugget_1.jpg'.")
 
-
 # -------------------------------
-# 5. Define a Model-to-Cover Transformation
+# 5. Define the Model-to-Cover Transformation
 # -------------------------------
 def compute_model_transform(vertices, desired_base_width=100, desired_offset=(50, 50)):
     pts = np.array(vertices)
@@ -128,9 +131,7 @@ def compute_model_transform(vertices, desired_base_width=100, desired_offset=(50
     ], dtype=np.float32)
     return T
 
-
 model_transform = compute_model_transform(model.vertices, desired_base_width=100, desired_offset=(50, 50))
-
 
 def transform_vertices(vertices, T):
     pts = np.array(vertices)
@@ -139,56 +140,57 @@ def transform_vertices(vertices, T):
     pts_trans = (T @ pts_h.T).T
     return pts_trans[:, :3]
 
-
 # -------------------------------
 # 6. Utility: Render a Textured Triangle
 # -------------------------------
 def draw_textured_triangle(frame, tri_dst, tri_src, texture):
-    # Compute bounding rectangle for destination triangle.
     x, y, w, h = cv2.boundingRect(np.int32(tri_dst))
+    # Clip the rectangle to be within the frame bounds
+    x = max(x, 0)
+    y = max(y, 0)
+    w = min(w, frame.shape[1] - x)
+    h = min(h, frame.shape[0] - y)
     if w == 0 or h == 0:
         return
     tri_dst_rect = tri_dst - np.array([[x, y]], dtype=np.float32)
     M = cv2.getAffineTransform(np.float32(tri_src), tri_dst_rect)
-    warped_patch = cv2.warpAffine(texture, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    warped_patch = cv2.warpAffine(texture, M, (w, h),
+                                  flags=cv2.INTER_LINEAR,
+                                  borderMode=cv2.BORDER_REFLECT)
     mask = np.zeros((h, w), dtype=np.uint8)
     cv2.fillConvexPoly(mask, np.int32(tri_dst_rect), 255)
     roi = frame[y:y + h, x:x + w]
+    # Ensure that the ROI has the same spatial size as the mask
+    if roi.shape[:2] != mask.shape:
+        # Resize the ROI if necessary (this should rarely happen)
+        roi = cv2.resize(roi, (mask.shape[1], mask.shape[0]))
     warped_patch_masked = cv2.bitwise_and(warped_patch, warped_patch, mask=mask)
     roi_masked = cv2.bitwise_and(roi, roi, mask=cv2.bitwise_not(mask))
     frame[y:y + h, x:x + w] = cv2.add(roi_masked, warped_patch_masked)
 
-
 # -------------------------------
-# 7. Render the OBJ Model with Texture
+# 7. Render the Nugget OBJ Model with Texture
 # -------------------------------
 def render_obj(frame, model, rvec, tvec, camera_matrix, dist_coefs, model_transform, texture_img):
-    # Transform the model's vertices to cover-space.
+    # Transform model vertices to cover coordinate system.
     transformed_vertices = transform_vertices(model.vertices, model_transform)
     projected, _ = cv2.projectPoints(transformed_vertices, rvec, tvec, camera_matrix, dist_coefs)
     projected = projected.reshape(-1, 2)
 
-    # Compute camera-space coordinates for depth sorting.
+    # Depth sorting: compute camera-space coordinates.
     R, _ = cv2.Rodrigues(rvec)
     cam_pts = (R @ transformed_vertices.T + tvec).T
-
     face_depths = []
     for face in model.faces:
         face_idx, _, _, _ = face
         zs = [cam_pts[i][2] for i in face_idx]
-        avg_z = np.mean(zs)
-        face_depths.append(avg_z)
-
-    # Sort faces by average depth (farthest first)
+        face_depths.append(np.mean(zs))
     sorted_faces = [face for _, face in sorted(zip(face_depths, model.faces),
                                                key=lambda pair: pair[0],
                                                reverse=True)]
-
     tex_h, tex_w = texture_img.shape[:2]
-
-    # Render each face.
     for face in sorted_faces:
-        face_idx, _, tex_idx, material = face
+        face_idx, _, tex_idx, _ = face
         if any(ti < 0 for ti in tex_idx):
             continue
         pts_img = [projected[i] for i in face_idx]
@@ -200,19 +202,17 @@ def render_obj(frame, model, rvec, tvec, camera_matrix, dist_coefs, model_transf
         pts_tex = np.array(pts_tex, dtype=np.float32)
         if len(pts_img) < 3:
             continue
-        # Triangulate using fan triangulation.
+        # Triangulate the face using fan triangulation.
         for i in range(1, len(pts_img) - 1):
             tri_img = np.array([pts_img[0], pts_img[i], pts_img[i + 1]], dtype=np.float32)
             tri_tex = np.array([pts_tex[0], pts_tex[i], pts_tex[i + 1]], dtype=np.float32)
             draw_textured_triangle(frame, tri_img, tri_tex, texture_img)
     return frame
 
-
 # -------------------------------
 # 8. Setup ORB Detector & FLANN Matcher for Cover Tracking
 # -------------------------------
-# (You can adjust nfeatures to trade off speed vs. robustness.)
-orb = cv2.ORB_create(nfeatures=1000)
+orb = cv2.ORB_create(nfeatures=1500)
 kp_ref, des_ref = orb.detectAndCompute(cover_img, None)
 FLANN_INDEX_LSH = 6
 index_params = dict(algorithm=FLANN_INDEX_LSH, table_number=6, key_size=12, multi_probe_level=1)
@@ -226,74 +226,64 @@ video = cv2.VideoCapture("IMG_9144.MOV")
 if not video.isOpened():
     raise ValueError("Error: Could not open video file 'IMG_9144.MOV'.")
 
-# Let’s try writing output at 30 fps for smoother playback.
+# Save output directly to the script directory.
+script_dir = os.path.dirname(os.path.abspath(__file__))
+output_filename = '_nugget_meditation.avi'
+destination_path = os.path.join(script_dir, output_filename)
 fourcc = cv2.VideoWriter_fourcc(*'XVID')
 out = None
 
-# Variables for pose smoothing.
-last_rvec = None
-last_tvec = None
-alpha_pose = 0.7  # (0 = no smoothing, 1 = full smoothing)
-
-# Downscale factor for feature matching (smaller is faster, but too small may lose detail)
-scale_factor = 0.3
-
-# We'll process every frame for the first 'initial_frame_threshold' frames
-# to “bootstrap” tracking, then switch to a processing interval.
-initial_frame_threshold = 30
-processing_interval = 2  # heavy processing every 2 frames after initialization
-
-frame_count = 0
+# -------------------------------
+# 10. Process Video Frames with Temporal Filtering
+# -------------------------------
+H_history = deque(maxlen=5)
 last_valid_H = None
+alpha = 0.5  # Smoothing factor for homography
+frame_count = 0
 
-# -------------------------------
-# 10. Process Video Frames
-# -------------------------------
 while True:
     ret, frame = video.read()
     if not ret:
         break
-
     frame_count += 1
 
-    # Decide on update frequency and matching threshold based on frame number.
-    if frame_count < initial_frame_threshold:
-        current_min_matches = 20  # lower threshold during initialization
-        current_interval = 1  # process every frame
+    # Update homography on every second frame.
+    update_H = (frame_count % 2 == 0)
+    if not update_H and last_valid_H is not None:
+        H = last_valid_H
     else:
-        current_min_matches = 50
-        current_interval = processing_interval
-
-    # Only update heavy computations on frames according to the interval.
-    if frame_count % current_interval == 0:
-        # Downscale frame for faster feature matching.
-        frame_small = cv2.resize(frame, None, fx=scale_factor, fy=scale_factor)
-        gray_small = cv2.cvtColor(frame_small, cv2.COLOR_BGR2GRAY)
-        kp_frame_small, des_frame_small = orb.detectAndCompute(gray_small, None)
-        if des_frame_small is None or len(des_frame_small) < 2:
+        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        kp_frame, des_frame = orb.detectAndCompute(gray_frame, None)
+        if des_frame is None or len(des_frame) < 2:
             cv2.imshow("Overlay", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
             continue
-
-        matches = flann.knnMatch(des_ref, des_frame_small, k=2)
+        matches = flann.knnMatch(des_ref, des_frame, k=2)
         good_matches = []
-        for m_n in matches:
-            if len(m_n) != 2:
+        for match in matches:
+            if len(match) != 2:
                 continue
-            m, n = m_n
+            m, n = match
             if m.distance < 0.7 * n.distance:
                 good_matches.append(m)
-        if len(good_matches) > current_min_matches:
+        min_matches = 50
+        if len(good_matches) > min_matches:
             src_pts = np.float32([kp_ref[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-            dst_pts = np.float32([kp_frame_small[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-            dst_pts = dst_pts / scale_factor  # Scale back to original size.
+            dst_pts = np.float32([kp_frame[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
             H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 8.0)
-            if H is None:
-                cv2.imshow("Overlay", frame)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
-                continue
+            if H is not None:
+                if last_valid_H is not None:
+                    H = alpha * last_valid_H + (1 - alpha) * H
+                last_valid_H = H
+            else:
+                if last_valid_H is not None:
+                    H = last_valid_H
+                else:
+                    cv2.imshow("Overlay", frame)
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        break
+                    continue
         else:
             if last_valid_H is not None:
                 H = last_valid_H
@@ -302,66 +292,41 @@ while True:
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
                 continue
-        last_valid_H = H
 
-        # Warp the cover image using the computed homography.
-        warped_cover = cv2.warpPerspective(cover_img, H, (frame.shape[1], frame.shape[0]))
-        mask_cover = cv2.cvtColor(warped_cover, cv2.COLOR_BGR2GRAY)
-        _, mask_cover = cv2.threshold(mask_cover, 1, 255, cv2.THRESH_BINARY)
-        mask_cover = cv2.resize(mask_cover, (frame.shape[1], frame.shape[0]))
-        mask_cover = mask_cover.astype(np.uint8)
-        frame_bg = cv2.bitwise_and(frame, frame, mask=cv2.bitwise_not(mask_cover))
-        overlay_frame = cv2.add(frame_bg, warped_cover)
+    # Warp the cover image (for visualization/blending)
+    warped_cover = cv2.warpPerspective(cover_img, H, (frame.shape[1], frame.shape[0]))
+    mask_cover = cv2.cvtColor(warped_cover, cv2.COLOR_BGR2GRAY)
+    _, mask_cover = cv2.threshold(mask_cover, 1, 255, cv2.THRESH_BINARY)
+    mask_cover = cv2.resize(mask_cover, (frame.shape[1], frame.shape[0]))
+    mask_cover = mask_cover.astype(np.uint8)
+    frame_bg = cv2.bitwise_and(frame, frame, mask=cv2.bitwise_not(mask_cover))
+    overlay_frame = cv2.add(frame_bg, warped_cover)
 
-        # Compute the cover image corners and estimate pose.
-        cover_img_corners_reshaped = cover_img_corners.reshape(-1, 1, 2)
-        video_cover_corners = cv2.perspectiveTransform(cover_img_corners_reshaped, H)
-        video_cover_corners = video_cover_corners.reshape(-1, 2)
-        ret_pnp, rvec, tvec = cv2.solvePnP(cover_obj_points, video_cover_corners,
-                                           camera_matrix, dist_coefs)
-        if ret_pnp:
-            # Smooth the pose parameters if we have previous values.
-            if last_rvec is not None and last_tvec is not None:
-                rvec = alpha_pose * last_rvec + (1 - alpha_pose) * rvec
-                tvec = alpha_pose * last_tvec + (1 - alpha_pose) * tvec
-            last_rvec, last_tvec = rvec, tvec
-        else:
-            if last_rvec is not None and last_tvec is not None:
-                rvec = last_rvec
-                tvec = last_tvec
-    else:
-        # For frames when heavy processing is skipped, reuse last computed values.
-        if last_valid_H is None or last_rvec is None or last_tvec is None:
-            cv2.imshow("Overlay", frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-            continue
-        H = last_valid_H
-        rvec = last_rvec
-        tvec = last_tvec
-        warped_cover = cv2.warpPerspective(cover_img, H, (frame.shape[1], frame.shape[0]))
-        mask_cover = cv2.cvtColor(warped_cover, cv2.COLOR_BGR2GRAY)
-        _, mask_cover = cv2.threshold(mask_cover, 1, 255, cv2.THRESH_BINARY)
-        mask_cover = cv2.resize(mask_cover, (frame.shape[1], frame.shape[0]))
-        mask_cover = mask_cover.astype(np.uint8)
-        frame_bg = cv2.bitwise_and(frame, frame, mask=cv2.bitwise_not(mask_cover))
-        overlay_frame = cv2.add(frame_bg, warped_cover)
+    # Transform cover image corners to current frame.
+    cover_img_corners_reshaped = cover_img_corners.reshape(-1, 1, 2)
+    video_cover_corners = cv2.perspectiveTransform(cover_img_corners_reshaped, H)
+    video_cover_corners = video_cover_corners.reshape(-1, 2)
 
-    # Render the OBJ model using the current (or last computed) pose.
-    if rvec is not None and tvec is not None:
+    # Estimate the cover’s pose using solvePnP.
+    ret_pnp, rvec, tvec = cv2.solvePnP(cover_obj_points, video_cover_corners,
+                                       camera_matrix, dist_coefs)
+    if ret_pnp:
+        # Instead of drawing a cube, render the nugget model.
         overlay_frame = render_obj(overlay_frame, model, rvec, tvec,
                                    camera_matrix, dist_coefs, model_transform, texture_img)
 
-    # Initialize VideoWriter if not already done (set to 30 fps for smoother playback).
     if out is None:
-        out = cv2.VideoWriter('warped_nugget_output.avi', fourcc, 30.0,
-                              (frame.shape[1], frame.shape[0]))
+        out = cv2.VideoWriter(destination_path, fourcc, 20.0, (frame.shape[1], frame.shape[0]))
     out.write(overlay_frame)
     cv2.imshow("Overlay", overlay_frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
+# -------------------------------
+# 11. Cleanup
+# -------------------------------
 video.release()
 if out:
     out.release()
 cv2.destroyAllWindows()
+print("Output video has been saved to:", destination_path)

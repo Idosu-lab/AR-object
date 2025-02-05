@@ -9,15 +9,22 @@ from collections import deque
 cv2.ocl.setUseOpenCL(False)
 
 # -------------------------------
-# 2. Camera Calibration Parameters
+# 2. Updated Camera Calibration Parameters
 # -------------------------------
-# (Using your provided calibration values)
-camera_matrix = np.array([[914.83565528, 0., 473.00332971],
-                          [0., 916.97895899, 641.10946217],
-                          [0., 0., 1.]], dtype=np.float32)
-dist_coefs = np.array([2.28710423e-01, -7.17194756e-01,
-                       2.12408818e-04, -2.47017341e-03,
-                       3.13534277e-02], dtype=np.float32)
+# RMS Error: 9.521700391689423
+# Camera Matrix (K):
+#  [[5.85493857e+03, 0.00000000e+00, 8.43369971e+02],
+#   [0.00000000e+00, 4.13083151e+03, 6.01898161e+02],
+#   [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]]
+# Distortion Coefficients:
+#  [5.38606908e+00, -7.73244839e+01, 7.51650400e-01, 1.17381409e-01, 2.67996027e+02]
+
+camera_matrix = np.array([[5.85493857e+03, 0.0, 8.43369971e+02],
+                          [0.0, 4.13083151e+03, 6.01898161e+02],
+                          [0.0, 0.0, 1.0]], dtype=np.float32)
+dist_coefs = np.array([5.38606908e+00, -7.73244839e+01,
+                       7.51650400e-01, 1.17381409e-01,
+                       2.67996027e+02], dtype=np.float32)
 
 # -------------------------------
 # 3. Reference Cover Image & Its Real-World Size
@@ -230,10 +237,9 @@ cv2.destroyAllWindows()
 # -------------------------------
 # 10. Ensure the output video is saved in the same folder as this script
 # -------------------------------
-
 # Get the directory of the current script
 script_dir = os.path.dirname(os.path.abspath(__file__))
-output_filename = 'warped_cube_output.avi'
+output_filename = 'cube_on_meditation.avi'
 destination_path = os.path.join(script_dir, output_filename)
 
 # Get the path where the VideoWriter saved the file (usually the current working directory)
