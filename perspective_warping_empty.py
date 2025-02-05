@@ -12,7 +12,7 @@ if ref_img is None:
 orb = cv2.ORB_create()
 kp_ref, des_ref = orb.detectAndCompute(ref_img, None)
 
-video = cv2.VideoCapture("vid1.MOV")  # The recorded video for tracking
+video = cv2.VideoCapture("IMG_9144.MOV")  # The recorded video for tracking
 if not video.isOpened():
     raise ValueError("Error: Could not open video.")
 

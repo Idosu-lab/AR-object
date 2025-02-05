@@ -14,11 +14,43 @@ square_size = 25  # Square size in mm
 obj_points = []  # 3D points
 img_points = []  # 2D points
 
-# List of calibration images
+# Updated list of calibration images (union of original and new images)
 image_files = [
-    "IMG_9093 Large.jpeg", "IMG_9095 Large.jpeg", "IMG_9097 Large.jpeg", "IMG_9098 Large.jpeg",
-    "IMG_9099 Large.jpeg", "IMG_9100 Large.jpeg", "IMG_9101 Large.jpeg", "IMG_9102 Large.jpeg",
-    "IMG_9103 Large.jpeg", "IMG_9104 Large.jpeg"
+    # Images with "Large" in the filename
+    "IMG_9091 Large.jpeg",
+    "IMG_9092 Large.jpeg",
+    "IMG_9093 Large.jpeg",
+    "IMG_9094 Large.jpeg",
+    "IMG_9095 Large.jpeg",
+    "IMG_9096 Large.jpeg",
+    "IMG_9097 Large.jpeg",
+    "IMG_9098 Large.jpeg",
+    "IMG_9099 Large.jpeg",
+    "IMG_9100 Large.jpeg",
+    "IMG_9101 Large.jpeg",
+    "IMG_9102 Large.jpeg",
+    "IMG_9103 Large.jpeg",
+    "IMG_9104 Large.jpeg",
+    # Images without "Large" and other variations
+    "IMG_9122 copy.jpeg",
+    "IMG_9122.jpeg",
+    "IMG_9123.jpeg",
+    "IMG_9124.jpeg",
+    "IMG_9125.jpeg",
+    "IMG_9126.jpeg",
+    "IMG_9127.jpeg",
+    "IMG_9128.jpeg",
+    "IMG_9129.jpeg",
+    "IMG_9130.jpeg",
+    "IMG_9131.jpeg",
+    "IMG_9132.jpeg",
+    "IMG_9133.jpeg",
+    "IMG_9134.jpeg",
+    "IMG_9135.jpeg",
+    "IMG_9136.jpeg",
+    "IMG_9137.jpeg",
+    "IMG_9138.jpeg",
+    "IMG_9139.jpeg"
 ]
 
 print("Found Images:", image_files)
@@ -53,18 +85,22 @@ for fname in image_files:
         last_gray = gray
 
         # Refine corners
-        corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1),
-                                    criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001))
+        corners2 = cv2.cornerSubPix(
+            gray, corners, (11, 11), (-1, -1),
+            criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+        )
         img_points[-1] = corners2
     else:
         print(f"❌ Chessboard NOT detected in {fname}. Try adjusting brightness or rotating the image.")
 
 cv2.destroyAllWindows()
 
-# Ensure we have a valid grayscale image for calibration
-if len(obj_points) >= 8:  # Ensure we have at least 8 successful detections
-    h, w = last_gray.shape[:2]  # Get image width & height
-    rms, camera_matrix, dist_coefs, rvecs, tvecs = cv2.calibrateCamera(obj_points, img_points, (w, h), None, None)
+# Ensure we have enough valid chessboard images for calibration
+if len(obj_points) >= 8:  # At least 8 successful detections are recommended
+    h, w = last_gray.shape[:2]  # Get image height and width
+    rms, camera_matrix, dist_coefs, rvecs, tvecs = cv2.calibrateCamera(
+        obj_points, img_points, (w, h), None, None
+    )
 
     # Save calibration results
     np.save("camera_intrinsics.npy", camera_matrix)
@@ -75,7 +111,7 @@ if len(obj_points) >= 8:  # Ensure we have at least 8 successful detections
     print("Camera Matrix (K):\n", camera_matrix)
     print("Distortion Coefficients:\n", dist_coefs.ravel())
 
-    # Apply undistortion
+    # Apply undistortion and save images
     for fname in image_files:
         img = cv2.imread(fname)
         if img is None:
@@ -86,5 +122,12 @@ if len(obj_points) >= 8:  # Ensure we have at least 8 successful detections
         cv2.imwrite(output_file, undistorted)
         print(f"Saved undistorted image: {output_file}")
 else:
-    print(
-        "⚠️ Error: Not enough valid chessboard images found. Try adjusting brightness, contrast, or adding more images.")
+    print("⚠️ Error: Not enough valid chessboard images found. Try adjusting brightness, contrast, or adding more images.")
+
+# Save the first rotation and translation vectors for later use
+if rvecs and tvecs:
+    rvec = rvecs[0]
+    tvec = tvecs[0]
+    np.save("rvec.npy", rvec)
+    np.save("tvec.npy", tvec)
+    print("Saved rvec.npy and tvec.npy")
