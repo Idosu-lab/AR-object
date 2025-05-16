@@ -19,14 +19,6 @@ This AR system uses feature matching and homography to detect planar surfaces an
 
 ---
 
-## 🚀 Getting Started
-
-### Installation
-
-```bash
-git clone https://github.com/your-username/AR-object.git
-cd AR-object
-pip install -r requirements.txt
 
 📌 Technologies Used
 
